@@ -1,12 +1,15 @@
 import json
+import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from enum import Enum, StrEnum
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Self, Union
 from uuid import uuid4
 
 if TYPE_CHECKING:
     from models.model import AppMode
+from enum import StrEnum
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from sqlalchemy import Index, PrimaryKeyConstraint, func
@@ -103,7 +106,7 @@ class Workflow(Base):
         db.Index("workflow_version_idx", "tenant_id", "app_id", "version"),
     )
 
-    id: Mapped[str] = mapped_column(StringUUID, server_default=db.text("uuid_generate_v4()"))
+    id: Mapped[str] = mapped_column(StringUUID, default=lambda: uuid.uuid4())
     tenant_id: Mapped[str] = mapped_column(StringUUID, nullable=False)
     app_id: Mapped[str] = mapped_column(StringUUID, nullable=False)
     type: Mapped[str] = mapped_column(db.String(255), nullable=False)
@@ -121,28 +124,24 @@ class Workflow(Base):
         default=datetime.now(UTC).replace(tzinfo=None),
         server_onupdate=func.current_timestamp(),
     )
-    _environment_variables: Mapped[str] = mapped_column(
-        "environment_variables", db.Text, nullable=False, server_default="{}"
-    )
-    _conversation_variables: Mapped[str] = mapped_column(
-        "conversation_variables", db.Text, nullable=False, server_default="{}"
-    )
+    _environment_variables: Mapped[str] = mapped_column("environment_variables", db.Text, nullable=False, default="{}")
+    _conversation_variables: Mapped[str] = mapped_column("conversation_variables", db.Text, nullable=False, default="{}")
 
     @classmethod
     def new(
-        cls,
-        *,
-        tenant_id: str,
-        app_id: str,
-        type: str,
-        version: str,
-        graph: str,
-        features: str,
-        created_by: str,
-        environment_variables: Sequence[Variable],
-        conversation_variables: Sequence[Variable],
-        marked_name: str = "",
-        marked_comment: str = "",
+            cls,
+            *,
+            tenant_id: str,
+            app_id: str,
+            type: str,
+            version: str,
+            graph: str,
+            features: str,
+            created_by: str,
+            environment_variables: Sequence[Variable],
+            conversation_variables: Sequence[Variable],
+            marked_name: str = "",
+            marked_comment: str = "",
     ) -> Self:
         workflow = Workflow()
         workflow.id = str(uuid4())
@@ -243,20 +242,13 @@ class Workflow(Base):
 
     @property
     def tool_published(self) -> bool:
-        """
-        DEPRECATED: This property is not accurate for determining if a workflow is published as a tool.
-        It only checks if there's a WorkflowToolProvider for the app, not if this specific workflow version
-        is the one being used by the tool.
-
-        For accurate checking, use a direct query with tenant_id, app_id, and version.
-        """
         from models.tools import WorkflowToolProvider
 
         return (
-            db.session.query(WorkflowToolProvider)
-            .filter(WorkflowToolProvider.tenant_id == self.tenant_id, WorkflowToolProvider.app_id == self.app_id)
-            .count()
-            > 0
+                db.session.query(WorkflowToolProvider)
+                .filter(WorkflowToolProvider.tenant_id == self.tenant_id, WorkflowToolProvider.app_id == self.app_id)
+                .count()
+                > 0
         )
 
     @property
@@ -405,7 +397,7 @@ class WorkflowRun(Base):
         db.Index("workflow_run_tenant_app_sequence_idx", "tenant_id", "app_id", "sequence_number"),
     )
 
-    id: Mapped[str] = mapped_column(StringUUID, server_default=db.text("uuid_generate_v4()"))
+    id: Mapped[str] = mapped_column(StringUUID, default=lambda: uuid.uuid4())
     tenant_id: Mapped[str] = mapped_column(StringUUID)
     app_id: Mapped[str] = mapped_column(StringUUID)
     sequence_number: Mapped[int] = mapped_column()
@@ -420,12 +412,12 @@ class WorkflowRun(Base):
     error: Mapped[Optional[str]] = mapped_column(db.Text)
     elapsed_time = db.Column(db.Float, nullable=False, server_default=sa.text("0"))
     total_tokens: Mapped[int] = mapped_column(sa.BigInteger, server_default=sa.text("0"))
-    total_steps = db.Column(db.Integer, server_default=db.text("0"))
+    total_steps = db.Column(db.Integer, default=0)
     created_by_role: Mapped[str] = mapped_column(db.String(255))  # account, end_user
     created_by = db.Column(StringUUID, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
     finished_at = db.Column(db.DateTime)
-    exceptions_count = db.Column(db.Integer, server_default=db.text("0"))
+    exceptions_count = db.Column(db.Integer, default=0)
 
     @property
     def created_by_account(self):
@@ -515,7 +507,7 @@ class WorkflowRun(Base):
         )
 
 
-class WorkflowNodeExecutionTriggeredFrom(StrEnum):
+class WorkflowNodeExecutionTriggeredFrom(Enum):
     """
     Workflow Node Execution Triggered From Enum
     """
@@ -524,7 +516,7 @@ class WorkflowNodeExecutionTriggeredFrom(StrEnum):
     WORKFLOW_RUN = "workflow-run"
 
 
-class WorkflowNodeExecutionStatus(StrEnum):
+class WorkflowNodeExecutionStatus(Enum):
     """
     Workflow Node Execution Status Enum
     """
@@ -608,7 +600,7 @@ class WorkflowNodeExecution(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(StringUUID, server_default=db.text("uuid_generate_v4()"))
+    id: Mapped[str] = mapped_column(StringUUID, default=lambda: uuid.uuid4())
     tenant_id: Mapped[str] = mapped_column(StringUUID)
     app_id: Mapped[str] = mapped_column(StringUUID)
     workflow_id: Mapped[str] = mapped_column(StringUUID)
@@ -625,7 +617,7 @@ class WorkflowNodeExecution(Base):
     outputs: Mapped[Optional[str]] = mapped_column(db.Text)
     status: Mapped[str] = mapped_column(db.String(255))
     error: Mapped[Optional[str]] = mapped_column(db.Text)
-    elapsed_time: Mapped[float] = mapped_column(db.Float, server_default=db.text("0"))
+    elapsed_time: Mapped[float] = mapped_column(db.Float, default=0)
     execution_metadata: Mapped[Optional[str]] = mapped_column(db.Text)
     created_at: Mapped[datetime] = mapped_column(db.DateTime, server_default=func.current_timestamp())
     created_by_role: Mapped[str] = mapped_column(db.String(255))
@@ -635,7 +627,6 @@ class WorkflowNodeExecution(Base):
     @property
     def created_by_account(self):
         created_by_role = CreatedByRole(self.created_by_role)
-        # TODO(-LAN-): Avoid using db.session.get() here.
         return db.session.get(Account, self.created_by) if created_by_role == CreatedByRole.ACCOUNT else None
 
     @property
@@ -643,7 +634,6 @@ class WorkflowNodeExecution(Base):
         from models.model import EndUser
 
         created_by_role = CreatedByRole(self.created_by_role)
-        # TODO(-LAN-): Avoid using db.session.get() here.
         return db.session.get(EndUser, self.created_by) if created_by_role == CreatedByRole.END_USER else None
 
     @property
@@ -740,7 +730,7 @@ class WorkflowAppLog(Base):
         db.Index("workflow_app_log_workflow_run_idx", "workflow_run_id"),
     )
 
-    id: Mapped[str] = mapped_column(StringUUID, server_default=db.text("uuid_generate_v4()"))
+    id: Mapped[str] = mapped_column(StringUUID, default=lambda: uuid.uuid4())
     tenant_id: Mapped[str] = mapped_column(StringUUID)
     app_id: Mapped[str] = mapped_column(StringUUID)
     workflow_id = db.Column(StringUUID, nullable=False)
