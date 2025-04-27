@@ -65,6 +65,7 @@ from core.ops.ops_trace_manager import TraceQueueManager
 from core.workflow.enums import SystemVariableKey
 from core.workflow.graph_engine.entities.graph_runtime_state import GraphRuntimeState
 from core.workflow.nodes import NodeType
+from core.workflow.repository.workflow_node_execution_repository import WorkflowNodeExecutionRepository
 from events.message_event import message_was_created
 from extensions.ext_database import db
 from models import Conversation, EndUser, Message, MessageFile
@@ -93,6 +94,7 @@ class AdvancedChatAppGenerateTaskPipeline:
         user: Union[Account, EndUser],
         stream: bool,
         dialogue_count: int,
+        workflow_node_execution_repository: WorkflowNodeExecutionRepository,
     ) -> None:
         self._base_task_pipeline = BasedGenerateTaskPipeline(
             application_generate_entity=application_generate_entity,
@@ -123,6 +125,7 @@ class AdvancedChatAppGenerateTaskPipeline:
                 SystemVariableKey.WORKFLOW_ID: workflow.id,
                 SystemVariableKey.WORKFLOW_RUN_ID: application_generate_entity.workflow_run_id,
             },
+            workflow_node_execution_repository=workflow_node_execution_repository,
         )
 
         self._task_state = WorkflowTaskState()
