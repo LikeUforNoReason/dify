@@ -8,11 +8,11 @@ import os
 import pickle
 import re
 import time
+import uuid
 from json import JSONDecodeError
 from typing import Any, cast
 
 from sqlalchemy import func
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped
 
 from configs import dify_config
@@ -24,7 +24,7 @@ from services.entities.knowledge_entities.knowledge_entities import ParentMode, 
 from .account import Account
 from .engine import db
 from .model import App, Tag, TagBinding, UploadFile
-from .types import StringUUID
+from .types import AdjustedJSON, PostgresJSONIndex, StringUUID
 
 
 class DatasetPermissionEnum(enum.StrEnum):
@@ -38,18 +38,18 @@ class Dataset(db.Model):  # type: ignore[name-defined]
     __table_args__ = (
         db.PrimaryKeyConstraint("id", name="dataset_pkey"),
         db.Index("dataset_tenant_idx", "tenant_id"),
-        db.Index("retrieval_model_idx", "retrieval_model", postgresql_using="gin"),
+        PostgresJSONIndex("retrieval_model_idx", "retrieval_model", postgresql_using="gin"),
     )
 
     INDEXING_TECHNIQUE_LIST = ["high_quality", "economy", None]
     PROVIDER_LIST = ["vendor", "external", None]
 
-    id = db.Column(StringUUID, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, default=lambda: uuid.uuid4())
     tenant_id = db.Column(StringUUID, nullable=False)
     name = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text, nullable=True)
-    provider = db.Column(db.String(255), nullable=False, server_default=db.text("'vendor'::character varying"))
-    permission = db.Column(db.String(255), nullable=False, server_default=db.text("'only_me'::character varying"))
+    provider = db.Column(db.String(255), nullable=False, default="vendor")
+    permission = db.Column(db.String(255), nullable=False, default="only_me")
     data_source_type = db.Column(db.String(255))
     indexing_technique = db.Column(db.String(255), nullable=True)
     index_struct = db.Column(db.Text, nullable=True)
@@ -60,8 +60,8 @@ class Dataset(db.Model):  # type: ignore[name-defined]
     embedding_model = db.Column(db.String(255), nullable=True)
     embedding_model_provider = db.Column(db.String(255), nullable=True)
     collection_binding_id = db.Column(StringUUID, nullable=True)
-    retrieval_model = db.Column(JSONB, nullable=True)
-    built_in_field_enabled = db.Column(db.Boolean, nullable=False, server_default=db.text("false"))
+    retrieval_model = db.Column(AdjustedJSON, nullable=True)
+    built_in_field_enabled = db.Column(db.Boolean, nullable=False, default=False)
 
     @property
     def dataset_keyword_table(self):
@@ -118,7 +118,7 @@ class Dataset(db.Model):  # type: ignore[name-defined]
                 Document.indexing_status == "completed",
                 Document.enabled == True,
                 Document.archived == False,
-            )
+                )
             .scalar()
         )
 
@@ -130,7 +130,7 @@ class Dataset(db.Model):  # type: ignore[name-defined]
                 DocumentSegment.dataset_id == self.id,
                 DocumentSegment.status == "completed",
                 DocumentSegment.enabled == True,
-            )
+                )
             .scalar()
         )
 
@@ -170,7 +170,7 @@ class Dataset(db.Model):  # type: ignore[name-defined]
                 TagBinding.tenant_id == self.tenant_id,
                 Tag.tenant_id == self.tenant_id,
                 Tag.type == "knowledge",
-            )
+                )
             .all()
         )
 
@@ -262,9 +262,9 @@ class DatasetProcessRule(db.Model):  # type: ignore[name-defined]
         db.Index("dataset_process_rule_dataset_id_idx", "dataset_id"),
     )
 
-    id = db.Column(StringUUID, nullable=False, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, nullable=False, default=lambda: uuid.uuid4())
     dataset_id = db.Column(StringUUID, nullable=False)
-    mode = db.Column(db.String(255), nullable=False, server_default=db.text("'automatic'::character varying"))
+    mode = db.Column(db.String(255), nullable=False, default="automatic")
     rules = db.Column(db.Text, nullable=True)
     created_by = db.Column(StringUUID, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
@@ -302,11 +302,11 @@ class Document(db.Model):  # type: ignore[name-defined]
         db.Index("document_dataset_id_idx", "dataset_id"),
         db.Index("document_is_paused_idx", "is_paused"),
         db.Index("document_tenant_idx", "tenant_id"),
-        db.Index("document_metadata_idx", "doc_metadata", postgresql_using="gin"),
+        PostgresJSONIndex("document_metadata_idx", "doc_metadata", postgresql_using="gin"),
     )
 
     # initial fields
-    id = db.Column(StringUUID, nullable=False, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, nullable=False, default=lambda: uuid.uuid4())
     tenant_id = db.Column(StringUUID, nullable=False)
     dataset_id = db.Column(StringUUID, nullable=False)
     position = db.Column(db.Integer, nullable=False)
@@ -340,7 +340,7 @@ class Document(db.Model):  # type: ignore[name-defined]
     completed_at = db.Column(db.DateTime, nullable=True)
 
     # pause
-    is_paused = db.Column(db.Boolean, nullable=True, server_default=db.text("false"))
+    is_paused = db.Column(db.Boolean, nullable=True, default=False)
     paused_by = db.Column(StringUUID, nullable=True)
     paused_at = db.Column(db.DateTime, nullable=True)
 
@@ -349,18 +349,18 @@ class Document(db.Model):  # type: ignore[name-defined]
     stopped_at = db.Column(db.DateTime, nullable=True)
 
     # basic fields
-    indexing_status = db.Column(db.String(255), nullable=False, server_default=db.text("'waiting'::character varying"))
-    enabled = db.Column(db.Boolean, nullable=False, server_default=db.text("true"))
+    indexing_status = db.Column(db.String(255), nullable=False, default="waiting")
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
     disabled_at = db.Column(db.DateTime, nullable=True)
     disabled_by = db.Column(StringUUID, nullable=True)
-    archived = db.Column(db.Boolean, nullable=False, server_default=db.text("false"))
+    archived = db.Column(db.Boolean, nullable=False, default=False)
     archived_reason = db.Column(db.String(255), nullable=True)
     archived_by = db.Column(StringUUID, nullable=True)
     archived_at = db.Column(db.DateTime, nullable=True)
     updated_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
     doc_type = db.Column(db.String(40), nullable=True)
-    doc_metadata = db.Column(JSONB, nullable=True)
-    doc_form = db.Column(db.String(255), nullable=False, server_default=db.text("'text_model'::character varying"))
+    doc_metadata = db.Column(AdjustedJSON, nullable=True)
+    doc_form = db.Column(db.String(255), nullable=False, default="text_model")
     doc_language = db.Column(db.String(255), nullable=True)
 
     DATA_SOURCES = ["upload_file", "notion_import", "website_crawl"]
@@ -648,7 +648,7 @@ class DocumentSegment(db.Model):  # type: ignore[name-defined]
     )
 
     # initial fields
-    id = db.Column(StringUUID, nullable=False, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, nullable=False, default=lambda: uuid.uuid4())
     tenant_id = db.Column(StringUUID, nullable=False)
     dataset_id = db.Column(StringUUID, nullable=False)
     document_id = db.Column(StringUUID, nullable=False)
@@ -665,10 +665,10 @@ class DocumentSegment(db.Model):  # type: ignore[name-defined]
 
     # basic fields
     hit_count = db.Column(db.Integer, nullable=False, default=0)
-    enabled = db.Column(db.Boolean, nullable=False, server_default=db.text("true"))
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
     disabled_at = db.Column(db.DateTime, nullable=True)
     disabled_by = db.Column(StringUUID, nullable=True)
-    status = db.Column(db.String(255), nullable=False, server_default=db.text("'waiting'::character varying"))
+    status = db.Column(db.String(255), nullable=False, default="waiting")
     created_by = db.Column(StringUUID, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
     updated_by = db.Column(StringUUID, nullable=True)
@@ -796,7 +796,7 @@ class ChildChunk(db.Model):  # type: ignore[name-defined]
     )
 
     # initial fields
-    id = db.Column(StringUUID, nullable=False, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, nullable=False, default=lambda: uuid.uuid4())
     tenant_id = db.Column(StringUUID, nullable=False)
     dataset_id = db.Column(StringUUID, nullable=False)
     document_id = db.Column(StringUUID, nullable=False)
@@ -807,11 +807,11 @@ class ChildChunk(db.Model):  # type: ignore[name-defined]
     # indexing fields
     index_node_id = db.Column(db.String(255), nullable=True)
     index_node_hash = db.Column(db.String(255), nullable=True)
-    type = db.Column(db.String(255), nullable=False, server_default=db.text("'automatic'::character varying"))
+    type = db.Column(db.String(255), nullable=False, default="automatic")
     created_by = db.Column(StringUUID, nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, server_default=db.text("CURRENT_TIMESTAMP(0)"))
+    created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
     updated_by = db.Column(StringUUID, nullable=True)
-    updated_at = db.Column(db.DateTime, nullable=False, server_default=db.text("CURRENT_TIMESTAMP(0)"))
+    updated_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
     indexing_at = db.Column(db.DateTime, nullable=True)
     completed_at = db.Column(db.DateTime, nullable=True)
     error = db.Column(db.Text, nullable=True)
@@ -836,10 +836,10 @@ class AppDatasetJoin(db.Model):  # type: ignore[name-defined]
         db.Index("app_dataset_join_app_dataset_idx", "dataset_id", "app_id"),
     )
 
-    id = db.Column(StringUUID, primary_key=True, nullable=False, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, primary_key=True, nullable=False, default=lambda: uuid.uuid4())
     app_id = db.Column(StringUUID, nullable=False)
     dataset_id = db.Column(StringUUID, nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, server_default=db.func.current_timestamp())
+    created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
 
     @property
     def app(self):
@@ -853,14 +853,14 @@ class DatasetQuery(db.Model):  # type: ignore[name-defined]
         db.Index("dataset_query_dataset_id_idx", "dataset_id"),
     )
 
-    id = db.Column(StringUUID, primary_key=True, nullable=False, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, primary_key=True, nullable=False, default=lambda: uuid.uuid4())
     dataset_id = db.Column(StringUUID, nullable=False)
     content = db.Column(db.Text, nullable=False)
     source = db.Column(db.String(255), nullable=False)
     source_app_id = db.Column(StringUUID, nullable=True)
-    created_by_role = db.Column(db.String, nullable=False)
+    created_by_role = db.Column(db.String(255), nullable=False)
     created_by = db.Column(StringUUID, nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, server_default=db.func.current_timestamp())
+    created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
 
 
 class DatasetKeywordTable(db.Model):  # type: ignore[name-defined]
@@ -870,12 +870,11 @@ class DatasetKeywordTable(db.Model):  # type: ignore[name-defined]
         db.Index("dataset_keyword_table_dataset_id_idx", "dataset_id"),
     )
 
-    id = db.Column(StringUUID, primary_key=True, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, primary_key=True, default=lambda: uuid.uuid4())
     dataset_id = db.Column(StringUUID, nullable=False, unique=True)
     keyword_table = db.Column(db.Text, nullable=False)
-    data_source_type = db.Column(
-        db.String(255), nullable=False, server_default=db.text("'database'::character varying")
-    )
+    data_source_type = db.Column(db.String(255), nullable=False, default="database")
+
 
     @property
     def keyword_table_dict(self):
@@ -916,14 +915,12 @@ class Embedding(db.Model):  # type: ignore[name-defined]
         db.Index("created_at_idx", "created_at"),
     )
 
-    id = db.Column(StringUUID, primary_key=True, server_default=db.text("uuid_generate_v4()"))
-    model_name = db.Column(
-        db.String(255), nullable=False, server_default=db.text("'text-embedding-ada-002'::character varying")
-    )
+    id = db.Column(StringUUID, primary_key=True, default=lambda: uuid.uuid4())
+    model_name = db.Column(db.String(255), nullable=False, default="text-embedding-ada-002")
     hash = db.Column(db.String(64), nullable=False)
     embedding = db.Column(db.LargeBinary, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
-    provider_name = db.Column(db.String(255), nullable=False, server_default=db.text("''::character varying"))
+    provider_name = db.Column(db.String(255), nullable=False, default="")
 
     def set_embedding(self, embedding_data: list[float]):
         self.embedding = pickle.dumps(embedding_data, protocol=pickle.HIGHEST_PROTOCOL)
@@ -939,10 +936,10 @@ class DatasetCollectionBinding(db.Model):  # type: ignore[name-defined]
         db.Index("provider_model_name_idx", "provider_name", "model_name"),
     )
 
-    id = db.Column(StringUUID, primary_key=True, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, primary_key=True, default=lambda: uuid.uuid4())
     provider_name = db.Column(db.String(255), nullable=False)
     model_name = db.Column(db.String(255), nullable=False)
-    type = db.Column(db.String(40), server_default=db.text("'dataset'::character varying"), nullable=False)
+    type = db.Column(db.String(40), default="dataset", nullable=False)
     collection_name = db.Column(db.String(64), nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
 
@@ -956,12 +953,12 @@ class TidbAuthBinding(db.Model):  # type: ignore[name-defined]
         db.Index("tidb_auth_bindings_created_at_idx", "created_at"),
         db.Index("tidb_auth_bindings_status_idx", "status"),
     )
-    id = db.Column(StringUUID, primary_key=True, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, primary_key=True, default=lambda: uuid.uuid4())
     tenant_id = db.Column(StringUUID, nullable=True)
     cluster_id = db.Column(db.String(255), nullable=False)
     cluster_name = db.Column(db.String(255), nullable=False)
-    active = db.Column(db.Boolean, nullable=False, server_default=db.text("false"))
-    status = db.Column(db.String(255), nullable=False, server_default=db.text("CREATING"))
+    active = db.Column(db.Boolean, nullable=False, default=False)
+    status = db.Column(db.String(255), nullable=False, default="CREATING")
     account = db.Column(db.String(255), nullable=False)
     password = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
@@ -973,7 +970,7 @@ class Whitelist(db.Model):  # type: ignore[name-defined]
         db.PrimaryKeyConstraint("id", name="whitelists_pkey"),
         db.Index("whitelists_tenant_idx", "tenant_id"),
     )
-    id = db.Column(StringUUID, primary_key=True, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, primary_key=True, default=lambda: uuid.uuid4())
     tenant_id = db.Column(StringUUID, nullable=True)
     category = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
@@ -988,11 +985,11 @@ class DatasetPermission(db.Model):  # type: ignore[name-defined]
         db.Index("idx_dataset_permissions_tenant_id", "tenant_id"),
     )
 
-    id = db.Column(StringUUID, server_default=db.text("uuid_generate_v4()"), primary_key=True)
+    id = db.Column(StringUUID, default=lambda: uuid.uuid4(), primary_key=True)
     dataset_id = db.Column(StringUUID, nullable=False)
     account_id = db.Column(StringUUID, nullable=False)
     tenant_id = db.Column(StringUUID, nullable=False)
-    has_permission = db.Column(db.Boolean, nullable=False, server_default=db.text("true"))
+    has_permission = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
 
 
@@ -1004,7 +1001,7 @@ class ExternalKnowledgeApis(db.Model):  # type: ignore[name-defined]
         db.Index("external_knowledge_apis_name_idx", "name"),
     )
 
-    id = db.Column(StringUUID, nullable=False, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, nullable=False, default=lambda: uuid.uuid4())
     name = db.Column(db.String(255), nullable=False)
     description = db.Column(db.String(255), nullable=False)
     tenant_id = db.Column(StringUUID, nullable=False)
@@ -1059,11 +1056,11 @@ class ExternalKnowledgeBindings(db.Model):  # type: ignore[name-defined]
         db.Index("external_knowledge_bindings_external_knowledge_api_idx", "external_knowledge_api_id"),
     )
 
-    id = db.Column(StringUUID, nullable=False, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, nullable=False, default=lambda: uuid.uuid4())
     tenant_id = db.Column(StringUUID, nullable=False)
     external_knowledge_api_id = db.Column(StringUUID, nullable=False)
     dataset_id = db.Column(StringUUID, nullable=False)
-    external_knowledge_id = db.Column(db.Text, nullable=False)
+    external_knowledge_id = db.Column(StringUUID, nullable=False)
     created_by = db.Column(StringUUID, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
     updated_by = db.Column(StringUUID, nullable=True)
@@ -1079,12 +1076,12 @@ class DatasetAutoDisableLog(db.Model):  # type: ignore[name-defined]
         db.Index("dataset_auto_disable_log_created_atx", "created_at"),
     )
 
-    id = db.Column(StringUUID, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, default=lambda: uuid.uuid4())
     tenant_id = db.Column(StringUUID, nullable=False)
     dataset_id = db.Column(StringUUID, nullable=False)
     document_id = db.Column(StringUUID, nullable=False)
-    notified = db.Column(db.Boolean, nullable=False, server_default=db.text("false"))
-    created_at = db.Column(db.DateTime, nullable=False, server_default=db.text("CURRENT_TIMESTAMP(0)"))
+    notified = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
 
 
 class RateLimitLog(db.Model):  # type: ignore[name-defined]
@@ -1095,11 +1092,11 @@ class RateLimitLog(db.Model):  # type: ignore[name-defined]
         db.Index("rate_limit_log_operation_idx", "operation"),
     )
 
-    id = db.Column(StringUUID, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, default=lambda: uuid.uuid4())
     tenant_id = db.Column(StringUUID, nullable=False)
     subscription_plan = db.Column(db.String(255), nullable=False)
     operation = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, server_default=db.text("CURRENT_TIMESTAMP(0)"))
+    created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
 
 
 class DatasetMetadata(db.Model):  # type: ignore[name-defined]
@@ -1110,13 +1107,13 @@ class DatasetMetadata(db.Model):  # type: ignore[name-defined]
         db.Index("dataset_metadata_dataset_idx", "dataset_id"),
     )
 
-    id = db.Column(StringUUID, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, default=lambda: uuid.uuid4())
     tenant_id = db.Column(StringUUID, nullable=False)
     dataset_id = db.Column(StringUUID, nullable=False)
     type = db.Column(db.String(255), nullable=False)
     name = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, server_default=db.text("CURRENT_TIMESTAMP(0)"))
-    updated_at = db.Column(db.DateTime, nullable=False, server_default=db.text("CURRENT_TIMESTAMP(0)"))
+    created_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
+    updated_at = db.Column(db.DateTime, nullable=False, server_default=func.current_timestamp())
     created_by = db.Column(StringUUID, nullable=False)
     updated_by = db.Column(StringUUID, nullable=True)
 
@@ -1131,7 +1128,7 @@ class DatasetMetadataBinding(db.Model):  # type: ignore[name-defined]
         db.Index("dataset_metadata_binding_document_idx", "document_id"),
     )
 
-    id = db.Column(StringUUID, server_default=db.text("uuid_generate_v4()"))
+    id = db.Column(StringUUID, default=lambda: uuid.uuid4())
     tenant_id = db.Column(StringUUID, nullable=False)
     dataset_id = db.Column(StringUUID, nullable=False)
     metadata_id = db.Column(StringUUID, nullable=False)
